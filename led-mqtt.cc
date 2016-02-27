@@ -30,6 +30,23 @@
 
 #include <unordered_map>
 
+#define MQTT_SERVER "tcp://mqtt.tiefpunkt.com:1883"
+#define MQTT_TOPIC "mumalab/room/ledpanel/#"
+#define MQTT_USERNAME ""
+#define MQTT_PASSWORD ""
+#define MQTT_CLIENTID "led-mqtt-client"
+#define LED_TEXT1 "Welcome to the MunichMakerLab!"
+#define LED_TEXT2 "We love LEDs!"
+#define PANEL_ROWS 32
+#define PANEL_CHAINS 4
+#define PANEL_PARALLEL 1
+#define PANEL_PWM_BITS 5
+#define PANEL_BRIGHTNESS 100
+#define PANEL_ROTATION 0
+#define PANEL_LARGE_DISPLAY false
+#define DO_LUMINANCE_CORRECT true
+bool as_daemon = false;
+
 using std::min;
 using std::max;
 
@@ -64,18 +81,16 @@ public:
     color2_(Color(0,0,255)),
     speed1_(12),
     speed2_(10),
-    matrix_(m)
+    matrix_(m),
+    offscreen_(matrix_->CreateFrameCanvas()),
+    screen_height(matrix_->transformer()->Transform(offscreen_)->height()),
+    screen_width(matrix_->transformer()->Transform(offscreen_)->width())
   { 
-    offscreen_ = matrix_->CreateFrameCanvas();
-
     font1_.LoadFont("fonts/10x20.bdf");
     font2_.LoadFont("fonts/7x14.bdf");
 
     scroll_offset1_ = calc_offset_(text1_, font1_);
     scroll_offset2_ = calc_offset_(text2_, font2_);
-
-    const int screen_height = matrix_->transformer()->Transform(offscreen_)->height();
-    const int screen_width = matrix_->transformer()->Transform(offscreen_)->width();
 
     x1_ = screen_width - 1;
     x2_ = screen_width - 1;
@@ -88,20 +103,43 @@ public:
     timepoint_t now = std::chrono::steady_clock::now();
     timepoint_t time_next1 = now + std::chrono::milliseconds(speed1_);
     timepoint_t time_next2 = now + std::chrono::milliseconds(speed2_);
-
+    
     while (running()) {
       matrix_->transformer()->Transform(offscreen_)->Clear();
-      if (once1_.empty()) {
+      if (!once1_.empty()) {
+        DrawText(matrix_->transformer()->Transform(offscreen_), font1_, x1_, y1_, color1_, once1_.c_str());
+      } 
+      else if (!textleft1_.empty() || !textmid1_.empty() || !textright1_.empty()) {
+        if (!textleft1_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font1_, 1, y1_, color1_, textleft1_.c_str());
+        }
+        if (!textmid1_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font1_, (screen_width % 2), y1_, color1_, textleft1_.c_str());
+        }
+        if (!textright1_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font1_, screen_width, y1_, color1_, textleft1_.c_str());
+        }
+      }
+      else {
         DrawText(matrix_->transformer()->Transform(offscreen_), font1_, x1_, y1_, color1_, text1_.c_str());
       }
-      else {
-        DrawText(matrix_->transformer()->Transform(offscreen_), font1_, x1_, y1_, color1_, once1_.c_str());
-      }
-      if (once2_.empty()) {
-        DrawText(matrix_->transformer()->Transform(offscreen_), font2_, x2_, y2_, color2_, text2_.c_str());
-      }
-      else {
+
+      if (!once2_.empty()) {
         DrawText(matrix_->transformer()->Transform(offscreen_), font2_, x2_, y2_, color2_, once2_.c_str());
+      } 
+      else if (!textleft2_.empty() || !textmid2_.empty() || !textright2_.empty()) {
+        if (!textleft2_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font2_, 1, y2_, color2_, textleft2_.c_str());
+        }
+        if (!textmid2_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font2_, (screen_width % 2), y2_, color2_, textmid1_.c_str());
+        }
+        if (!textright2_.empty()) {
+          DrawText(matrix_->transformer()->Transform(offscreen_), font2_, screen_width, y2_, color2_, textright2_.c_str());
+        }
+      }
+      else {
+        DrawText(matrix_->transformer()->Transform(offscreen_), font2_, x2_, y2_, color2_, text2_.c_str());
       }
       
       //std::this_thread::yield();
@@ -150,6 +188,30 @@ public:
     if (key == "text2") {
       text2_ = value;
       scroll_offset2_ = calc_offset_(text2_, font2_) - 1;
+    }
+    if (key == "textleft1") {
+      textleft1_ = value;
+      scroll_offset1_ = 0;
+    }
+    if (key == "textmid1") {
+      textmid1_ = value;
+      scroll_offset1_ = 0;
+    }
+    if (key == "textright1") {
+      textright1_ = value;
+      scroll_offset1_ = 0;
+    }
+    if (key == "textleft2") {
+      textleft2_ = value;
+      scroll_offset1_ = 0;
+    }
+    if (key == "textmid2") {
+      textmid2_ = value;
+      scroll_offset1_ = 0;
+    }
+    if (key == "textright2") {
+      textright2_ = value;
+      scroll_offset1_ = 0;
     }
     if (key == "once1" || key == "once") {
       once1_ = value;
@@ -218,6 +280,12 @@ private:
   std::string text2_;
   std::string once1_;
   std::string once2_;
+  std::string textleft1_;
+  std::string textmid1_;
+  std::string textright1_;
+  std::string textleft2_;
+  std::string textmid2_;
+  std::string textright2_;  
   int scroll_offset1_;
   int scroll_offset2_;
   Color color1_;
@@ -226,13 +294,14 @@ private:
   int speed2_;
   Font font1_;
   Font font2_;
+  RGBMatrix* matrix_;
+  FrameCanvas* offscreen_;
+  const int screen_height;
+  const int screen_width;
   int x1_;
   int x2_;
   int y1_;
   int y2_;
-  
-  RGBMatrix* matrix_;
-  FrameCanvas* offscreen_;
 };
 
 
@@ -1533,6 +1602,9 @@ private:
           display_->set_display(stoi(anim_params["animation"]), anim_params);
       }
       else if (option == "text" || option == "text1" || option == "text2"
+              || option == "textleft" || option == "textleft1" || option == "textleft2"
+              || option == "textmid" || option == "textmid1" || option == "textmid2"
+              || option == "textright" || option == "textright1" || option == "textright2"
               || option == "once" || option == "once1" || option == "once2"
               || option == "color" || option == "color1" || option == "color2"
               || option == "speed" || option == "speed1" || option == "speed2"
@@ -1553,26 +1625,26 @@ private:
 ***/
 
 int main(int argc, char *argv[]) {
-  int rows = 32;
-  int chain = 4;
-  int parallel = 1;
-  int pwm_bits = -1;
-  int brightness = 100;
-  int rotation = 0;
-  bool large_display = false;
-  bool do_luminance_correct = true;
-  bool as_daemon = false;
-  std::string mqtt_server("tcp://192.168.200.80:1883");
-  std::string mqtt_topic("led/#");
-  std::string mqtt_username("munichmakerlab");
-  std::string mqtt_password("h4ck1ngr00m");
-  std::string text1("Welcome to the Munich Maker Lab!");
-  std::string text2("We love LEDs.");
-  const std::string mqtt_clientid("led-mqtt-client");
+  int rows = PANEL_ROWS;
+  int chain = PANEL_CHAINS;
+  int parallel = PANEL_PARALLEL;
+  int pwm_bits = PANEL_PWM_BITS;
+  int brightness = PANEL_BRIGHTNESS;
+  int rotation = PANEL_ROTATION;
+  bool large_display = PANEL_LARGE_DISPLAY;
+  bool do_luminance_correct = DO_LUMINANCE_CORRECT;
+  std::string mqtt_server(MQTT_SERVER);
+  std::string mqtt_topic(MQTT_TOPIC);
+  std::string mqtt_username(MQTT_USERNAME);
+  std::string mqtt_password(MQTT_PASSWORD);
+  std::string text1(LED_TEXT1);
+  std::string text2(LED_TEXT2);
+  const std::string mqtt_clientid(MQTT_CLIENTID);
   const int  mqtt_qos = 1;
   int animation = 12; // Initial Display animation
   params_map anim_params;
   int opt;
+  bool as_daemon = false;
   
   while ((opt = getopt(argc, argv, "dlD:r:P:c:p:b:m:LR:S:T:U:W:t:u:")) != -1) {
     switch (opt) {
@@ -1691,15 +1763,30 @@ int main(int argc, char *argv[]) {
   }
 
   // Start daemon before we start any threads.
-  //if (fork() != 0)
-  //  return 0;
-  // close(STDIN_FILENO);
-  // close(STDOUT_FILENO);
-  // close(STDERR_FILENO);
+  if (as_daemon) {
+    pid_t pid = fork();
+    
+    /* An error occurred */
+    if (pid < 0)
+        exit(EXIT_FAILURE);
+
+    /* Success: Let the parent terminate */
+    if (pid > 0)
+        exit(EXIT_SUCCESS);
+
+    /* On success: The child process becomes session leader */
+    if (setsid() < 0)
+        exit(EXIT_FAILURE);
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+  }
 
   Display* display = new Display(rows, chain, parallel, pwm_bits, brightness, rotation, large_display, do_luminance_correct);
   display->set_display(animation, anim_params);
-  sleep(2);
+  sleep(3); // display needs some time to load font etc.
+  
   mqtt::async_client client(mqtt_server, mqtt_clientid, NULL);
   action_listener subListener("Subscription");
   callback cb(client, subListener, mqtt_topic, mqtt_qos, display);
@@ -1707,9 +1794,9 @@ int main(int argc, char *argv[]) {
   mqtt::connect_options connOpts;
   connOpts.set_keep_alive_interval(20);
   connOpts.set_clean_session(true);
-  if (mqtt_username.empty())
+  if (!mqtt_username.empty())
     connOpts.set_user_name(mqtt_username);
-  if (mqtt_password.empty())
+  if (!mqtt_password.empty())
     connOpts.set_password(mqtt_password);
 
   try {
@@ -1717,32 +1804,24 @@ int main(int argc, char *argv[]) {
     std::cout << "MQTT Waiting for the connection..." << std::flush;
     conntok->wait_for_completion();
     std::cout << "OK" << std::endl;
-
     std::cout << "MQTT Subscribing to topic " << mqtt_topic << "\n"
       << "for client " << mqtt_clientid
       << " using QoS" << mqtt_qos << std::endl;
-
     client.subscribe(mqtt_topic, mqtt_qos, nullptr, subListener);
 
-    std::cout << "Go..." << std::endl << std::flush;
+    std::cout << "Ready..." << std::endl << std::flush;
     display->set_option("text1", text1);
     display->set_option("text2", text2);
     display->set_option("color2", "200,10,80");
     display->set_option("speed2", "10");
-    
-    // Start daemon before we start any threads.
+
     if (as_daemon) {
-      if (fork() != 0)
-        return 0;
-      //close(STDIN_FILENO);
-      //close(STDOUT_FILENO);
-      //close(STDERR_FILENO);
-      
-    } else {
-      std::cout << "Press Q<Enter> to quit\n" << std::endl;
-      while (std::tolower(std::cin.get()) != 'q') {
-        ;
+      while(true){
+        sleep(INT_MAX);
       }
+    } else {
+      std::cout << "Press <RETURN> to exit and reset LEDs"  << std::endl;
+      getchar();
     }
 
     std::cout << "MQTT Disconnecting..." << std::flush;
@@ -1752,10 +1831,7 @@ int main(int argc, char *argv[]) {
   }
   catch (const mqtt::exception& exc) {
     std::cerr << "MQTT Error: " << exc.what() << std::endl;
-    return 1;
+    return EXIT_FAILURE;
   }
-
-  std::cout << "Done..." << std::endl << std::flush;
-
-  return 0;
+  return EXIT_SUCCESS;
 }
