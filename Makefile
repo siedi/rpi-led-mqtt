@@ -8,7 +8,7 @@ RGB_INCDIR=matrix/include
 RGB_LIBDIR=matrix/lib
 RGB_LIBRARY_NAME=rgbmatrix
 RGB_LIBRARY=$(RGB_LIBDIR)/lib$(RGB_LIBRARY_NAME).a
-LDFLAGS+=-L$(PAHO_C_LIB) -L$(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -ljsoncpp -lmqttpp -lpaho-mqtt3a -lrt -lm -lpthread
+LDFLAGS+=-L$(PAHO_C_LIB) -L$(RGB_LIBDIR) -l$(RGB_LIBRARY_NAME) -ljsoncpp -lpaho-mqtt3a -lpaho-mqttpp3 -lrt -lm -lpthread
 CPPFLAGS += -I$(PAHO_C_HEADERS)
 CXXFLAGS=-Wall -std=c++0x
 ifdef DEBUG

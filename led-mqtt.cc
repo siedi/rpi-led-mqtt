@@ -30,7 +30,7 @@
 
 #include <unordered_map>
 
-#define MQTT_SERVER "tcp://mqtt.tiefpunkt.com:1883"
+#define MQTT_SERVER "tcp://mqtt.munichmakerlab.de:1883"
 #define MQTT_TOPIC "mumalab/room/ledpanel/#"
 #define MQTT_USERNAME ""
 #define MQTT_PASSWORD ""
@@ -79,7 +79,7 @@ public:
     once2_(""),
     color1_(Color(0,0,255)),
     color2_(Color(0,0,255)),
-    speed1_(12),
+    speed1_(16),
     speed2_(10),
     matrix_(m),
     offscreen_(matrix_->CreateFrameCanvas()),
@@ -146,13 +146,12 @@ public:
       offscreen_ = matrix_->SwapOnVSync(offscreen_);
       //std::this_thread::yield();
       now = std::chrono::steady_clock::now();
-
       if (time_next1 < time_next2) {
-        if (time_next1 > now)
+        if (time_next1 - std::chrono::milliseconds(2) > now)
           std::this_thread::sleep_for(time_next1 - now);
       } 
       else {
-        if (time_next2 > now)
+        if (time_next2 - std::chrono::milliseconds(2) > now)
           std::this_thread::sleep_for(time_next2 - now);
       }
       if (now >= time_next1) {
@@ -1481,30 +1480,32 @@ public:
 private:
   std::string name_;
 
-  virtual void on_failure(const mqtt::itoken& tok) {
+  virtual void on_failure(const mqtt::token& tok) {
     std::cout << name_ << " failure";
     if (tok.get_message_id() != 0)
-      std::cout << " (token: " << tok.get_message_id() << ")" << std::endl;
+      std::cout << " (token: [" << tok.get_message_id() << "]" << std::endl;
     std::cout << std::endl;
   }
 
-  virtual void on_success(const mqtt::itoken& tok) {
+  virtual void on_success(const mqtt::token& tok) {
     std::cout << name_ << " success";
     if (tok.get_message_id() != 0)
-      std::cout << " (token: " << tok.get_message_id() << ")" << std::endl;
-    if (!tok.get_topics().empty())
-      std::cout << "\ttoken topic: '" << tok.get_topics()[0] << "', ..." << std::endl;
+      std::cout << " for token: [" << tok.get_message_id() << "]" << std::endl;
+    auto top = tok.get_topics();
+    if (top && !top->empty())
+      std::cout << "\ttoken topic: '" << (*top)[0] << "', ..." << std::endl;
     std::cout << std::endl;
   }
 };
 
 class callback : public virtual mqtt::callback, public virtual mqtt::iaction_listener {
 public:
-  callback(mqtt::async_client& cli, action_listener& listener, std::string& topic, int qos, Display* display)
-                                : cli_(cli), listener_(listener), topic_(topic), qos_(qos), display_(display) {}
+  callback(mqtt::async_client& cli, mqtt::connect_options& connOpts, action_listener& listener, std::string& topic, int qos, Display* display)
+                                : cli_(cli), connOpts_(connOpts), listener_(listener), topic_(topic), qos_(qos), display_(display) {}
 private:
   int nretry_;
   mqtt::async_client& cli_;
+  mqtt::connect_options& connOpts_;
   action_listener& listener_;
   std::string topic_;
   int qos_;
@@ -1512,12 +1513,9 @@ private:
 
   void reconnect() {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    mqtt::connect_options connOpts;
-    connOpts.set_keep_alive_interval(20);
-    connOpts.set_clean_session(true);
 
     try {
-      cli_.connect(connOpts, nullptr, *this);
+      cli_.connect(connOpts_, nullptr, *this);
     }
     catch (const mqtt::exception& exc) {
       std::cerr << "Error: " << exc.what() << std::endl;
@@ -1526,7 +1524,7 @@ private:
   }
 
   // Re-connection failure
-  virtual void on_failure(const mqtt::itoken& tok) {
+  virtual void on_failure(const mqtt::token& tok) {
     std::cout << "Reconnection failed." << std::endl;
     if (++nretry_ > 5)
       exit(1);
@@ -1534,7 +1532,7 @@ private:
   }
 
   // Re-connection success
-  virtual void on_success(const mqtt::itoken& tok) {
+  virtual void on_success(const mqtt::token& tok) {
     std::cout << "Reconnection success" << std::endl;;
     cli_.subscribe(topic_, qos_, nullptr, listener_);
   }
@@ -1568,10 +1566,10 @@ private:
     std::cout << "\tOption: " << option << std::endl;
 
     // we are trying to parse the message
-    if (!msg->to_str().empty()) {
+    if (!msg->to_string().empty()) {
       Json::Value jsonData;
       Json::Reader jsonReader;
-      if (jsonReader.parse(msg->to_str(), jsonData) && msg->to_str().substr(0,1) == "{") {
+      if (jsonReader.parse(msg->to_string(), jsonData) && msg->to_string().substr(0,1) == "{") {
         std::cout << "\tJSON data" << std::endl;
         std::cout << "\t" << jsonData.toStyledString() << std::endl;  
         for ( auto it = jsonData.begin(); it != jsonData.end(); ++it ) {
@@ -1590,8 +1588,8 @@ private:
       }
       else {
         std::cout << "\tString received:" << std::endl;
-        std::cout << "\t" << msg->to_str() << std::endl;
-        anim_params[option] = msg->to_str();
+        std::cout << "\t" << msg->to_string() << std::endl;
+        anim_params[option] = msg->to_string();
       }
     }
 
@@ -1615,7 +1613,7 @@ private:
     } // end command
   }
 
-  virtual void delivery_complete(mqtt::idelivery_token_ptr token) {}
+  virtual void delivery_complete(mqtt::delivery_token_ptr token) {}
 };
 
 /***
@@ -1787,10 +1785,8 @@ int main(int argc, char *argv[]) {
   display->set_display(animation, anim_params);
   sleep(3); // display needs some time to load font etc.
   
-  mqtt::async_client client(mqtt_server, mqtt_clientid, NULL);
   action_listener subListener("Subscription");
-  callback cb(client, subListener, mqtt_topic, mqtt_qos, display);
-  client.set_callback(cb);
+  
   mqtt::connect_options connOpts;
   connOpts.set_keep_alive_interval(20);
   connOpts.set_clean_session(true);
@@ -1799,16 +1795,18 @@ int main(int argc, char *argv[]) {
   if (!mqtt_password.empty())
     connOpts.set_password(mqtt_password);
 
+  mqtt::async_client client(mqtt_server, mqtt_clientid);
+  callback cb(client, connOpts, subListener, mqtt_topic, mqtt_qos, display);
+  client.set_callback(cb);
+
   try {
-    mqtt::itoken_ptr conntok = client.connect(connOpts);
     std::cout << "MQTT Waiting for the connection..." << std::flush;
-    conntok->wait_for_completion();
+    client.connect(connOpts, nullptr, cb)->wait();
     std::cout << "OK" << std::endl;
     std::cout << "MQTT Subscribing to topic " << mqtt_topic << "\n"
       << "for client " << mqtt_clientid
       << " using QoS" << mqtt_qos << std::endl;
-    client.subscribe(mqtt_topic, mqtt_qos, nullptr, subListener);
-
+    client.subscribe(mqtt_topic, mqtt_qos, nullptr, subListener)->wait();
     std::cout << "Ready..." << std::endl << std::flush;
     display->set_option("text1", text1);
     display->set_option("text2", text2);
@@ -1825,8 +1823,7 @@ int main(int argc, char *argv[]) {
     }
 
     std::cout << "MQTT Disconnecting..." << std::flush;
-    conntok = client.disconnect();
-    conntok->wait_for_completion();
+    client.disconnect()->wait();
     std::cout << "MQTT OK" << std::endl;
   }
   catch (const mqtt::exception& exc) {
